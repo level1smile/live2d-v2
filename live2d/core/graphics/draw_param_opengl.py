@@ -252,141 +252,295 @@ class DrawParamOpenGL(DrawParam):
         if not self.shaderProgramOff:
             return False
 
-        aK = ("#version 120\n"
-              "attribute vec2 a_position;"
-              "attribute vec2 a_texCoord;"
-              "varying vec2 v_texCoord;"
-              "varying vec4 v_clipPos;"
-              "uniform mat4 u_mvpMatrix;"
-              "void main(){"
-              "    gl_Position = u_mvpMatrix * vec4(a_position, 0.0, 1.0);"
-              "    v_clipPos = gl_Position;"
-              "    v_texCoord = a_texCoord;"
-              "    v_texCoord.y = 1.0 - v_texCoord.y;"
-              "}")
-        aM = ("#version 120\n"
-              "precision mediump float;"
-              "varying vec2       v_texCoord;"
-              "varying vec4       v_clipPos;"
-              "uniform sampler2D  s_texture0;"
-              "uniform vec4       u_channelFlag;"
-              "uniform vec4       u_baseColor;"
-              "uniform bool       u_maskFlag;"
-              "uniform vec4       u_screenColor;"
-              "uniform vec4       u_multiplyColor;"
-              "void main(){"
-              "    vec4 smpColor;"
-              "    if(u_maskFlag){"
-              "        float isInside = "
-              "            step(u_baseColor.x, v_clipPos.x/v_clipPos.w)"
-              "          * step(u_baseColor.y, v_clipPos.y/v_clipPos.w)"
-              "          * step(v_clipPos.x/v_clipPos.w, u_baseColor.z)"
-              "          * step(v_clipPos.y/v_clipPos.w, u_baseColor.w);"
-              "        smpColor = u_channelFlag * texture2D(s_texture0, v_texCoord).a * isInside;"
-              "    }else{"
-              "        smpColor = texture2D(s_texture0 , v_texCoord);"
-              "        smpColor.rgb = smpColor.rgb * smpColor.a;"
-              "        smpColor.rgb = smpColor.rgb * u_multiplyColor.rgb;"
-              "        smpColor.rgb = smpColor.rgb + u_screenColor.rgb - (smpColor.rgb * u_screenColor.rgb);"
-              "        smpColor = smpColor * u_baseColor;"
-              "    }"
-              "    gl_FragColor = smpColor;}")
-        aL = ("#version 120\n"
-              "attribute vec2     a_position;"
-              "attribute vec2     a_texCoord;"
-              "varying vec2       v_texCoord;"
-              "varying vec4       v_clipPos;"
-              "uniform mat4       u_mvpMatrix;"
-              "uniform mat4       u_clipMatrix;"
-              "void main(){"
-              "    vec4 pos = vec4(a_position, 0, 1.0);"
-              "    gl_Position = u_mvpMatrix * pos;"
-              "    v_clipPos = u_clipMatrix * pos;"
-              "    v_texCoord = a_texCoord;"
-              "    v_texCoord.y = 1.0 - v_texCoord.y;"
-              "}"
-              )
-        aJ = ("#version 120\n"
-              "precision mediump float;"
-              "varying   vec2   v_texCoord;"
-              "varying   vec4   v_clipPos;"
-              "uniform sampler2D  s_texture0;"
-              "uniform sampler2D  s_texture1;"
-              "uniform vec4       u_channelFlag;"
-              "uniform vec4       u_baseColor;"
-              "uniform vec4       u_screenColor;"
-              "uniform vec4       u_multiplyColor;"
-              "void main(){"
-              "    vec4 col_formask = texture2D(s_texture0, v_texCoord);"
-              "    col_formask.rgb = col_formask.rgb * u_multiplyColor.rgb;"
-              "    col_formask.rgb = col_formask.rgb + u_screenColor.rgb - (col_formask.rgb * u_screenColor.rgb);"
-              "    col_formask = col_formask * u_baseColor;"
-              "    col_formask.rgb = col_formask.rgb * col_formask.a;"
-              "    vec4 clipMask = texture2D(s_texture1, v_clipPos.xy / v_clipPos.w) * u_channelFlag;"
-              "    float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
-              "    col_formask = col_formask * maskVal;"
-              "    gl_FragColor = col_formask;}")
-        self.vertShader = self.compileShader(aN.VERTEX_SHADER, aK)
+        # ========== 主着色器（常规渲染） ==========
+        # 顶点着色器（GLSL 330 core）
+        vert_shader_main = """#version 330 core
+        layout(location = 0) in vec2 a_position;
+        layout(location = 1) in vec2 a_texCoord;
+        out vec2 v_texCoord;
+        out vec4 v_clipPos;
+        uniform mat4 u_mvpMatrix;
+        
+        void main() {
+            gl_Position = u_mvpMatrix * vec4(a_position, 0.0, 1.0);
+            v_clipPos = gl_Position;
+            v_texCoord = vec2(a_texCoord.x, 1.0 - a_texCoord.y);
+        }"""
+
+        # 片段着色器（GLSL 330 core）
+        frag_shader_main = """#version 330 core
+        in vec2 v_texCoord;
+        in vec4 v_clipPos;
+        out vec4 FragColor;
+        uniform sampler2D s_texture0;
+        uniform vec4 u_channelFlag;
+        uniform vec4 u_baseColor;
+        uniform bool u_maskFlag;
+        uniform vec4 u_screenColor;
+        uniform vec4 u_multiplyColor;
+        
+        void main() {
+            if(u_maskFlag) {
+                float isInside = 
+                    step(u_baseColor.x, v_clipPos.x/v_clipPos.w) *
+                    step(u_baseColor.y, v_clipPos.y/v_clipPos.w) *
+                    step(v_clipPos.x/v_clipPos.w, u_baseColor.z) *
+                    step(v_clipPos.y/v_clipPos.w, u_baseColor.w);
+                FragColor = u_channelFlag * texture(s_texture0, v_texCoord).a * isInside;
+            } else {
+                vec4 smpColor = texture(s_texture0, v_texCoord);
+                smpColor.rgb = smpColor.rgb * smpColor.a;
+                smpColor.rgb = smpColor.rgb * u_multiplyColor.rgb;
+                smpColor.rgb = smpColor.rgb + u_screenColor.rgb - (smpColor.rgb * u_screenColor.rgb);
+                FragColor = smpColor * u_baseColor;
+            }
+        }"""
+
+        # ========== 遮罩着色器（特殊渲染） ==========
+        # 顶点着色器（GLSL 330 core）
+        vert_shader_mask = """#version 330 core
+        layout(location = 0) in vec2 a_position;
+        layout(location = 1) in vec2 a_texCoord;
+        out vec2 v_texCoord;
+        out vec4 v_clipPos;
+        uniform mat4 u_mvpMatrix;
+        uniform mat4 u_clipMatrix;
+        
+        void main() {
+            vec4 pos = vec4(a_position, 0.0, 1.0);
+            gl_Position = u_mvpMatrix * pos;
+            v_clipPos = u_clipMatrix * pos;
+            v_texCoord = vec2(a_texCoord.x, 1.0 - a_texCoord.y);
+        }"""
+
+        # 片段着色器（GLSL 330 core）
+        frag_shader_mask = """#version 330 core
+        precision mediump float;
+        in vec2 v_texCoord;
+        in vec4 v_clipPos;
+        out vec4 FragColor;
+        uniform sampler2D s_texture0;
+        uniform sampler2D s_texture1;
+        uniform vec4 u_channelFlag;
+        uniform vec4 u_baseColor;
+        uniform vec4 u_screenColor;
+        uniform vec4 u_multiplyColor;
+        
+        void main() {
+            vec4 col_formask = texture(s_texture0, v_texCoord);
+            col_formask.rgb = col_formask.rgb * u_multiplyColor.rgb;
+            col_formask.rgb = col_formask.rgb + u_screenColor.rgb - (col_formask.rgb * u_screenColor.rgb);
+            col_formask = col_formask * u_baseColor;
+            col_formask.rgb = col_formask.rgb * col_formask.a;
+            
+            vec2 clipUV = v_clipPos.xy / v_clipPos.w;
+            vec4 clipMask = texture(s_texture1, clipUV) * u_channelFlag;
+            float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;
+            FragColor = col_formask * maskVal;
+        }"""
+
+        # ========== 编译着色器 ==========
+        self.vertShader = self.compileShader(aN.VERTEX_SHADER, vert_shader_main)
         if not self.vertShader:
-            print("Vertex shader compile li_!")
+            print("Vertex shader编译失败!")
             return False
 
-        self.vertShaderOff = self.compileShader(aN.VERTEX_SHADER, aL)
+        self.vertShaderOff = self.compileShader(aN.VERTEX_SHADER, vert_shader_mask)
         if not self.vertShaderOff:
-            print("OffVertex shader compile li_!")
+            print("Mask顶点着色器编译失败!")
             return False
 
-        self.fragShader = self.compileShader(aN.FRAGMENT_SHADER, aM)
+        self.fragShader = self.compileShader(aN.FRAGMENT_SHADER, frag_shader_main)
         if not self.fragShader:
-            print("Fragment shader compile li_!")
+            print("片段着色器编译失败!")
             return False
 
-        self.fragShaderOff = self.compileShader(aN.FRAGMENT_SHADER, aJ)
+        self.fragShaderOff = self.compileShader(aN.FRAGMENT_SHADER, frag_shader_mask)
         if not self.fragShaderOff:
-            print("OffFragment shader compile li_!")
+            print("Mask片段着色器编译失败!")
             return False
 
+        # ========== 链接着色器程序 ==========
         aN.attachShader(self.shaderProgram, self.vertShader)
         aN.attachShader(self.shaderProgram, self.fragShader)
         aN.attachShader(self.shaderProgramOff, self.vertShaderOff)
         aN.attachShader(self.shaderProgramOff, self.fragShaderOff)
+        
         aN.linkProgram(self.shaderProgram)
         aN.linkProgram(self.shaderProgramOff)
-        aH = aN.getProgramParameter(self.shaderProgram, aN.LINK_STATUS)
-        aX = aN.getProgramParameter(self.shaderProgramOff, aN.LINK_STATUS)
-        if not aH or not aX:
-            if aH:
-                aI = aN.getProgramInfoLog(self.shaderProgram)
-            else:
-                aI = aN.getProgramInfoLog(self.shaderProgramOff)
-            print(f"failed to link program: {aI}")
-            if self.vertShader:
-                aN.deleteShader(self.vertShader)
-                self.vertShader = 0
 
-            if self.fragShader:
-                aN.deleteShader(self.fragShader)
-                self.fragShader = 0
-
-            if self.shaderProgram:
-                aN.deleteProgram(self.shaderProgram)
-                self.shaderProgram = 0
-
-            if self.vertShaderOff:
-                aN.deleteShader(self.vertShaderOff)
-                self.vertShaderOff = 0
-
-            if self.fragShaderOff:
-                aN.deleteShader(self.fragShaderOff)
-                self.fragShaderOff = 0
-
-            if self.shaderProgramOff:
-                aN.deleteProgram(self.shaderProgramOff)
-                self.shaderProgramOff = 0
-
+        # ========== 检查链接状态 ==========
+        if not aN.getProgramParameter(self.shaderProgram, aN.LINK_STATUS) or \
+        not aN.getProgramParameter(self.shaderProgramOff, aN.LINK_STATUS):
+            error_main = aN.getProgramInfoLog(self.shaderProgram)
+            error_mask = aN.getProgramInfoLog(self.shaderProgramOff)
+            print(f"主程序链接错误: {error_main}")
+            print(f"遮罩程序链接错误: {error_mask}")
+            self._cleanup_shaders()
             return False
 
         return True
+
+    def _cleanup_shaders(self):
+        """清理着色器资源"""
+        aN = self.gl
+        if self.vertShader:
+            aN.deleteShader(self.vertShader)
+        if self.fragShader:
+            aN.deleteShader(self.fragShader)
+        if self.vertShaderOff:
+            aN.deleteShader(self.vertShaderOff)
+        if self.fragShaderOff:
+            aN.deleteShader(self.fragShaderOff)
+        if self.shaderProgram:
+            aN.deleteProgram(self.shaderProgram)
+        if self.shaderProgramOff:
+            aN.deleteProgram(self.shaderProgramOff)        
+    # def loadShaders2(self):
+    #     aN = self.gl
+    #     self.shaderProgram = aN.createProgram()
+    #     if not self.shaderProgram:
+    #         return False
+
+    #     self.shaderProgramOff = aN.createProgram()
+    #     if not self.shaderProgramOff:
+    #         return False
+
+    #     aK = ("#version 120\n"
+    #           "attribute vec2 a_position;"
+    #           "attribute vec2 a_texCoord;"
+    #           "varying vec2 v_texCoord;"
+    #           "varying vec4 v_clipPos;"
+    #           "uniform mat4 u_mvpMatrix;"
+    #           "void main(){"
+    #           "    gl_Position = u_mvpMatrix * vec4(a_position, 0.0, 1.0);"
+    #           "    v_clipPos = gl_Position;"
+    #           "    v_texCoord = a_texCoord;"
+    #           "    v_texCoord.y = 1.0 - v_texCoord.y;"
+    #           "}")
+    #     aM = ("#version 120\n"
+    #           "precision mediump float;"
+    #           "varying vec2       v_texCoord;"
+    #           "varying vec4       v_clipPos;"
+    #           "uniform sampler2D  s_texture0;"
+    #           "uniform vec4       u_channelFlag;"
+    #           "uniform vec4       u_baseColor;"
+    #           "uniform bool       u_maskFlag;"
+    #           "uniform vec4       u_screenColor;"
+    #           "uniform vec4       u_multiplyColor;"
+    #           "void main(){"
+    #           "    vec4 smpColor;"
+    #           "    if(u_maskFlag){"
+    #           "        float isInside = "
+    #           "            step(u_baseColor.x, v_clipPos.x/v_clipPos.w)"
+    #           "          * step(u_baseColor.y, v_clipPos.y/v_clipPos.w)"
+    #           "          * step(v_clipPos.x/v_clipPos.w, u_baseColor.z)"
+    #           "          * step(v_clipPos.y/v_clipPos.w, u_baseColor.w);"
+    #           "        smpColor = u_channelFlag * texture2D(s_texture0, v_texCoord).a * isInside;"
+    #           "    }else{"
+    #           "        smpColor = texture2D(s_texture0 , v_texCoord);"
+    #           "        smpColor.rgb = smpColor.rgb * smpColor.a;"
+    #           "        smpColor.rgb = smpColor.rgb * u_multiplyColor.rgb;"
+    #           "        smpColor.rgb = smpColor.rgb + u_screenColor.rgb - (smpColor.rgb * u_screenColor.rgb);"
+    #           "        smpColor = smpColor * u_baseColor;"
+    #           "    }"
+    #           "    gl_FragColor = smpColor;}")
+    #     aL = ("#version 120\n"
+    #           "attribute vec2     a_position;"
+    #           "attribute vec2     a_texCoord;"
+    #           "varying vec2       v_texCoord;"
+    #           "varying vec4       v_clipPos;"
+    #           "uniform mat4       u_mvpMatrix;"
+    #           "uniform mat4       u_clipMatrix;"
+    #           "void main(){"
+    #           "    vec4 pos = vec4(a_position, 0, 1.0);"
+    #           "    gl_Position = u_mvpMatrix * pos;"
+    #           "    v_clipPos = u_clipMatrix * pos;"
+    #           "    v_texCoord = a_texCoord;"
+    #           "    v_texCoord.y = 1.0 - v_texCoord.y;"
+    #           "}"
+    #           )
+    #     aJ = ("#version 120\n"
+    #           "precision mediump float;"
+    #           "varying   vec2   v_texCoord;"
+    #           "varying   vec4   v_clipPos;"
+    #           "uniform sampler2D  s_texture0;"
+    #           "uniform sampler2D  s_texture1;"
+    #           "uniform vec4       u_channelFlag;"
+    #           "uniform vec4       u_baseColor;"
+    #           "uniform vec4       u_screenColor;"
+    #           "uniform vec4       u_multiplyColor;"
+    #           "void main(){"
+    #           "    vec4 col_formask = texture2D(s_texture0, v_texCoord);"
+    #           "    col_formask.rgb = col_formask.rgb * u_multiplyColor.rgb;"
+    #           "    col_formask.rgb = col_formask.rgb + u_screenColor.rgb - (col_formask.rgb * u_screenColor.rgb);"
+    #           "    col_formask = col_formask * u_baseColor;"
+    #           "    col_formask.rgb = col_formask.rgb * col_formask.a;"
+    #           "    vec4 clipMask = texture2D(s_texture1, v_clipPos.xy / v_clipPos.w) * u_channelFlag;"
+    #           "    float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
+    #           "    col_formask = col_formask * maskVal;"
+    #           "    gl_FragColor = col_formask;}")
+    #     self.vertShader = self.compileShader(aN.VERTEX_SHADER, aK)
+    #     if not self.vertShader:
+    #         print("Vertex shader compile li_!")
+    #         return False
+
+    #     self.vertShaderOff = self.compileShader(aN.VERTEX_SHADER, aL)
+    #     if not self.vertShaderOff:
+    #         print("OffVertex shader compile li_!")
+    #         return False
+
+    #     self.fragShader = self.compileShader(aN.FRAGMENT_SHADER, aM)
+    #     if not self.fragShader:
+    #         print("Fragment shader compile li_!")
+    #         return False
+
+    #     self.fragShaderOff = self.compileShader(aN.FRAGMENT_SHADER, aJ)
+    #     if not self.fragShaderOff:
+    #         print("OffFragment shader compile li_!")
+    #         return False
+
+    #     aN.attachShader(self.shaderProgram, self.vertShader)
+    #     aN.attachShader(self.shaderProgram, self.fragShader)
+    #     aN.attachShader(self.shaderProgramOff, self.vertShaderOff)
+    #     aN.attachShader(self.shaderProgramOff, self.fragShaderOff)
+    #     aN.linkProgram(self.shaderProgram)
+    #     aN.linkProgram(self.shaderProgramOff)
+    #     aH = aN.getProgramParameter(self.shaderProgram, aN.LINK_STATUS)
+    #     aX = aN.getProgramParameter(self.shaderProgramOff, aN.LINK_STATUS)
+    #     if not aH or not aX:
+    #         if aH:
+    #             aI = aN.getProgramInfoLog(self.shaderProgram)
+    #         else:
+    #             aI = aN.getProgramInfoLog(self.shaderProgramOff)
+    #         print(f"failed to link program: {aI}")
+    #         if self.vertShader:
+    #             aN.deleteShader(self.vertShader)
+    #             self.vertShader = 0
+
+    #         if self.fragShader:
+    #             aN.deleteShader(self.fragShader)
+    #             self.fragShader = 0
+
+    #         if self.shaderProgram:
+    #             aN.deleteProgram(self.shaderProgram)
+    #             self.shaderProgram = 0
+
+    #         if self.vertShaderOff:
+    #             aN.deleteShader(self.vertShaderOff)
+    #             self.vertShaderOff = 0
+
+    #         if self.fragShaderOff:
+    #             aN.deleteShader(self.fragShaderOff)
+    #             self.fragShaderOff = 0
+
+    #         if self.shaderProgramOff:
+    #             aN.deleteProgram(self.shaderProgramOff)
+    #             self.shaderProgramOff = 0
+
+    #         return False
+
+    #     return True
 
     def createFramebuffer(self):
         aL = self.gl
