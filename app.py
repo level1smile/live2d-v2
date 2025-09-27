@@ -1,18 +1,10 @@
 ﻿import pygame
-
-
 from OpenGL.GL import *  # 新增导入
-
-
-
-
 from live2d.core import Live2D
 from live2d.framework import Live2DFramework
 from live2d.lapp_model import LAppModel
 from live2d.platform_manager import PlatformManager
 from typing import Optional
-
-
 # 在 app.py 的开头添加，查看当前目录结构
 import os
 print("当前目录:", os.getcwd())
@@ -126,3 +118,4 @@ while True:
 
 Live2D.dispose()
 pygame.quit()
+
