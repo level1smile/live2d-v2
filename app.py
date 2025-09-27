@@ -1,15 +1,42 @@
 ﻿import pygame
 
+
+from OpenGL.GL import *  # 新增导入
+
+
+
+
 from live2d.core import Live2D
 from live2d.framework import Live2DFramework
 from live2d.lapp_model import LAppModel
 from live2d.platform_manager import PlatformManager
+from typing import Optional
 
-SCR_WIDTH = 300
-SCR_HEIGHT = 300
+
+# 在 app.py 的开头添加，查看当前目录结构
+import os
+print("当前目录:", os.getcwd())
+print("文件列表:", os.listdir('.'))
+if os.path.exists('shaders'):
+    print("shaders目录:", os.listdir('shaders'))
+
+
+
+SCR_WIDTH = 500
+SCR_HEIGHT = 500
 
 pygame.init()
+# ==== 新增的OpenGL 2.1初始化代码 ====
+# 设置OpenGL 2.1兼容模式
+pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 2)
+pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 1)
+pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_COMPATIBILITY)
 pygame.display.set_mode((SCR_WIDTH, SCR_HEIGHT), pygame.DOUBLEBUF | pygame.OPENGL)
+print("OpenGL版本:", glGetString(GL_VERSION).decode())
+print("GLSL版本:", glGetString(GL_SHADING_LANGUAGE_VERSION).decode())
+
+
+
 
 Live2D.init()
 
@@ -17,19 +44,19 @@ Live2DFramework.setPlatformManager(PlatformManager())
 
 model = LAppModel()
 
-name = "kasumi2"
+name = "nito"
 model.LoadModelJson(f"resources/{name}/{name}.model.json")
 
 drag = False
-scaling = 1
+scaling =0.6
 dx = 0
 dy = 0
 
 model.SetAutoBreathEnable(True)
 model.SetAutoBlinkEnable(False)
 
-last_part_id: str | None = None
-
+# last_part_id: str | None = None
+last_part_id: Optional[str] = None
 
 def onEvent(e):
     global scaling, dx, dy, last_part_id
